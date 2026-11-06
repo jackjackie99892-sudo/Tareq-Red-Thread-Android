@@ -1,16 +1,18 @@
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 
 from math import sin
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Rectangle, Ellipse, Line
+from kivy.graphics import Color, Rectangle, Ellipse, Line, PushMatrix, PopMatrix, Translate, Scale
 from kivy.properties import BooleanProperty
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
+from kivy.utils import platform
 
+DESIGN_W=960.0; WORLD_H=432.0
 WHITE=(.93,.95,.97,1); DIM=(.62,.67,.73,1); TEAL=(.32,.75,.65,1); GOLD=(.91,.72,.31,1)
 RED=(.8,.28,.31,1); BLUE=(.3,.52,.75,1); PURPLE=(.51,.38,.68,1); PANEL=(.09,.12,.17,1); PANEL2=(.14,.18,.24,1)
 
@@ -82,54 +84,122 @@ class World(Widget):
         self.player_x=max(20,min(self.level['width']-20,self.player_x))
         self.vy-=900*dt; self.player_y+=self.vy*dt
         if self.player_y<=112: self.player_y=112; self.vy=0; self.on_ground=True
-        maxcam=max(0,self.level['width']-self.width); target=self.player_x-self.width*.45; self.camera += (max(0,min(maxcam,target))-self.camera)*min(1,dt*7)
+        maxcam=max(0,self.level['width']-DESIGN_W); target=self.player_x-DESIGN_W*.45; self.camera += (max(0,min(maxcam,target))-self.camera)*min(1,dt*7)
         if self.pending:
             kind,obj=self.pending; tx=(obj['x']+obj['w']/2 if kind=='item' else obj['x'])
             if abs(self.player_x-tx)<85: self.pending=None; self.auto=None; self.interact(obj,kind)
         if self.complete() and self.player_x>=self.level['exit_x']: self.next_level()
         self.redraw()
     def on_touch_down(self,touch):
-        if not self.active: return super().on_touch_down(touch)
-        if self.dialogue: self.close_dialogue(); return True
-        if touch.y<self.height*.18: return super().on_touch_down(touch)
-        wx=touch.x+self.camera; wy=touch.y
+        # Only handle touches that actually land inside the game-world widget.
+        # The on-screen movement buttons live below this widget.
+        if not self.collide_point(*touch.pos):
+            return False
+        if not self.active:
+            return False
+        if self.dialogue:
+            self.close_dialogue()
+            return True
+
+        # Android screens vary enormously in resolution/aspect ratio.
+        # Convert physical screen coordinates back to our 960x432 logical world.
+        sx = self.width / DESIGN_W if self.width else 1.0
+        sy = self.height / WORLD_H if self.height else 1.0
+        lx = (touch.x - self.x) / sx
+        ly = (touch.y - self.y) / sy
+        wx = lx + self.camera
+        wy = ly
+
         for obj in self.level['items']:
-            if obj['x']-18<=wx<=obj['x']+obj['w']+18 and obj['y']-25<=wy<=obj['y']+obj['h']+35:
-                self.pending=('item',obj); self.auto=obj['x']+obj['w']/2; return True
+            if obj['x']-28<=wx<=obj['x']+obj['w']+28 and obj['y']-35<=wy<=obj['y']+obj['h']+45:
+                self.pending=('item',obj)
+                self.auto=obj['x']+obj['w']/2
+                return True
         for obj in self.level['npcs']:
-            if obj['x']-45<=wx<=obj['x']+45 and 80<=wy<=250:
-                self.pending=('npc',obj); self.auto=obj['x']; return True
-        self.pending=None; self.auto=max(20,min(self.level['width']-20,wx)); return True
+            if obj['x']-55<=wx<=obj['x']+55 and 70<=wy<=260:
+                self.pending=('npc',obj)
+                self.auto=obj['x']
+                return True
+
+        # Tapping open scenery makes Tareq walk there.
+        self.pending=None
+        self.auto=max(20,min(self.level['width']-20,wx))
+        return True
     def palette(self):
         p=self.level['palette']
         return {'sheffield':((.21,.25,.30,1),(.17,.16,.15,1)),'iraq':((.71,.56,.37,1),(.41,.30,.22,1)),'hague':((.24,.32,.41,1),(.18,.20,.23,1)),'cairo':((.76,.53,.35,1),(.42,.28,.20,1)),'icc':((.12,.17,.23,1),(.15,.17,.20,1))}[p]
     def redraw(self):
-        self.canvas.clear();
-        if not self.active:return
-        top,ground=self.palette(); w,h=self.width,self.height
+        self.canvas.clear()
+        if not self.active:
+            return
+
+        top,ground=self.palette()
+        sx=self.width/DESIGN_W if self.width else 1.0
+        sy=self.height/WORLD_H if self.height else 1.0
+
+        # Everything below is drawn in a stable 960x432 logical coordinate
+        # system, then translated/scaled into the actual Android widget.
         with self.canvas:
-            Color(*top); Rectangle(pos=self.pos,size=self.size)
+            PushMatrix()
+            Translate(self.x,self.y)
+            Scale(sx,sy,1)
+
+            Color(*top)
+            Rectangle(pos=(0,0),size=(DESIGN_W,WORLD_H))
+
             Color(.12,.16,.21,1)
             for j in range(18):
-                x=j*170-(self.camera*.18)%170-80; bh=90+(j%5)*20; Rectangle(pos=(x,112),size=(125,bh))
-            Color(*ground); Rectangle(pos=(0,0),size=(w,112)); Color(.38,.36,.34,1); Rectangle(pos=(0,108),size=(w,4))
+                x=j*170-(self.camera*.18)%170-80
+                bh=90+(j%5)*20
+                Rectangle(pos=(x,112),size=(125,bh))
+
+            Color(*ground)
+            Rectangle(pos=(0,0),size=(DESIGN_W,112))
+            Color(.38,.36,.34,1)
+            Rectangle(pos=(0,108),size=(DESIGN_W,4))
+
             Color(.12,.16,.20,1)
             for xx in (250,900,1550,2200):
                 x=xx-self.camera
-                if -500<x<w+100: Rectangle(pos=(x,150),size=(420,150))
+                if -500<x<DESIGN_W+100:
+                    Rectangle(pos=(x,150),size=(420,150))
+
             for obj in self.level['items']:
                 x=obj['x']-self.camera
-                if -100<x<w+100:
-                    col=obj['color'] if obj['flag'] not in self.flags else tuple(max(.15,c*.45) for c in obj['color'][:3])+(1,); Color(*col); Rectangle(pos=(x,obj['y']),size=(obj['w'],obj['h']))
-                    if obj['flag'] not in self.flags: Color(*GOLD); Ellipse(pos=(x+obj['w']/2-5,obj['y']+obj['h']+10),size=(10,10))
+                if -100<x<DESIGN_W+100:
+                    col=obj['color'] if obj['flag'] not in self.flags else tuple(max(.15,v*.45) for v in obj['color'][:3])+(1,)
+                    Color(*col)
+                    Rectangle(pos=(x,obj['y']),size=(obj['w'],obj['h']))
+                    if obj['flag'] not in self.flags:
+                        Color(*GOLD)
+                        Ellipse(pos=(x+obj['w']/2-5,obj['y']+obj['h']+10),size=(10,10))
+
             for npc in self.level['npcs']:
                 x=npc['x']-self.camera
-                if -80<x<w+80:
-                    Color(.05,.06,.08,1); Ellipse(pos=(x-18,108),size=(36,9)); Color(.27,.29,.33,1); Rectangle(pos=(x-10,112),size=(8,35)); Rectangle(pos=(x+3,112),size=(8,35)); Color(.35,.42,.52,1); Rectangle(pos=(x-16,144),size=(32,42)); Color(.72,.53,.39,1); Rectangle(pos=(x-10,186),size=(20,22)); Color(.16,.12,.10,1); Rectangle(pos=(x-11,204),size=(22,8))
-            x=self.player_x-self.camera; y=self.player_y; bob=sin(self.t)*2 if self.left or self.right or self.auto else 0
-            Color(.04,.045,.06,1); Ellipse(pos=(x-21,y-5),size=(42,10)); Color(.18,.20,.24,1); Rectangle(pos=(x-12,y),size=(9,33)); Rectangle(pos=(x+3,y),size=(9,33)); Color(.18,.31,.42,1); Rectangle(pos=(x-17,y+30+bob),size=(34,42)); Rectangle(pos=(x-24,y+35+bob),size=(7,31)); Rectangle(pos=(x+17,y+35+bob),size=(7,31)); Color(.72,.53,.39,1); Rectangle(pos=(x-11,y+72+bob),size=(22,22)); Color(.15,.11,.09,1); Rectangle(pos=(x-12,y+90+bob),size=(24,9))
+                if -80<x<DESIGN_W+80:
+                    Color(.05,.06,.08,1); Ellipse(pos=(x-18,108),size=(36,9))
+                    Color(.27,.29,.33,1); Rectangle(pos=(x-10,112),size=(8,35)); Rectangle(pos=(x+3,112),size=(8,35))
+                    Color(.35,.42,.52,1); Rectangle(pos=(x-16,144),size=(32,42))
+                    Color(.72,.53,.39,1); Rectangle(pos=(x-10,186),size=(20,22))
+                    Color(.16,.12,.10,1); Rectangle(pos=(x-11,204),size=(22,8))
+
+            x=self.player_x-self.camera
+            y=self.player_y
+            bob=sin(self.t)*2 if self.left or self.right or self.auto else 0
+            Color(.04,.045,.06,1); Ellipse(pos=(x-21,y-5),size=(42,10))
+            Color(.18,.20,.24,1); Rectangle(pos=(x-12,y),size=(9,33)); Rectangle(pos=(x+3,y),size=(9,33))
+            Color(.18,.31,.42,1); Rectangle(pos=(x-17,y+30+bob),size=(34,42)); Rectangle(pos=(x-24,y+35+bob),size=(7,31)); Rectangle(pos=(x+17,y+35+bob),size=(7,31))
+            Color(.72,.53,.39,1); Rectangle(pos=(x-11,y+72+bob),size=(22,22))
+            Color(.15,.11,.09,1); Rectangle(pos=(x-12,y+90+bob),size=(24,9))
+
             ex=self.level['exit_x']-self.camera
-            if -100<ex<w+100: Color(*(TEAL if self.complete() else DIM)); Rectangle(pos=(ex-18,112),size=(36,120)); Color(.05,.07,.10,1); Rectangle(pos=(ex-10,120),size=(20,100))
+            if -100<ex<DESIGN_W+100:
+                Color(*(TEAL if self.complete() else DIM))
+                Rectangle(pos=(ex-18,112),size=(36,120))
+                Color(.05,.07,.10,1)
+                Rectangle(pos=(ex-10,120),size=(20,100))
+
+            PopMatrix()
 
 class UI(FloatLayout):
     def __init__(self,**kw):
@@ -139,28 +209,33 @@ class UI(FloatLayout):
         self.title.add_widget(Label(text='A FICTIONALISED CAREER DRAMA\n\nReal name. Real cities. Real institutions.\nInvented mystery, characters and operational events.',font_size='18sp',color=DIM,halign='center',size_hint=(.9,.30),pos_hint={'x':.05,'y':.38}))
         b=Button(text='START EPISODE 1',size_hint=(.42,.10),pos_hint={'x':.29,'y':.25},background_normal='',background_color=TEAL,color=(.03,.05,.07,1),font_size='20sp'); b.bind(on_release=lambda *_:self.world.start()); self.title.add_widget(b)
         self.title.add_widget(Label(text='Fiction inspired by real career milestones. It does not depict real institutional investigations or wrongdoing.',font_size='12sp',color=DIM,size_hint=(.96,.08),pos_hint={'x':.02,'y':.05}))
-        self.controls=FloatLayout(size_hint=(1,.20),pos_hint={'x':0,'y':0},opacity=0); self.add_widget(self.controls)
+        self.controls=FloatLayout(size_hint=(1,.20),pos_hint={'x':0,'y':0},opacity=0,disabled=True); self.add_widget(self.controls)
         self.lb=self.btn('◀',.02,.10); self.rb=self.btn('▶',.14,.10); self.jb=self.btn('JUMP',.28,.16)
         self.lb.bind(on_press=lambda *_:setattr(self.world,'left',True),on_release=lambda *_:setattr(self.world,'left',False)); self.rb.bind(on_press=lambda *_:setattr(self.world,'right',True),on_release=lambda *_:setattr(self.world,'right',False)); self.jb.bind(on_press=lambda *_:self.world.jump())
         self.ep=Label(text='',font_size='15sp',color=WHITE,size_hint=(.50,.55),pos_hint={'x':.46,'y':.37},halign='left'); self.controls.add_widget(self.ep)
         self.pr=Label(text='',font_size='14sp',color=GOLD,size_hint=(.34,.25),pos_hint={'x':.46,'y':.12},halign='left'); self.controls.add_widget(self.pr)
-        self.box=Button(text='',markup=True,font_size='17sp',halign='left',valign='middle',size_hint=(.90,.22),pos_hint={'x':.05,'y':.23},background_normal='',background_color=(.04,.06,.09,.98),color=WHITE,opacity=0); self.box.bind(size=lambda i,v:setattr(i,'text_size',(v[0]-30,v[1]-20))); self.box.bind(on_release=lambda *_:self.world.close_dialogue()); self.add_widget(self.box)
+        self.box=Button(text='',markup=True,font_size='17sp',halign='left',valign='middle',size_hint=(.90,.22),pos_hint={'x':.05,'y':.23},background_normal='',background_color=(.04,.06,.09,.98),color=WHITE,opacity=0,disabled=True); self.box.bind(size=lambda i,v:setattr(i,'text_size',(v[0]-30,v[1]-20))); self.box.bind(on_release=lambda *_:self.world.close_dialogue()); self.add_widget(self.box)
         self.card=Label(text='',markup=True,font_size='26sp',color=WHITE,halign='center',valign='middle',size_hint=(1,1),opacity=0); self.card.bind(size=lambda i,v:setattr(i,'text_size',(v[0]*.85,v[1]*.65))); self.add_widget(self.card)
         self.end=Label(text='',markup=True,font_size='20sp',color=WHITE,halign='center',valign='middle',size_hint=(1,1),opacity=0); self.end.bind(size=lambda i,v:setattr(i,'text_size',(v[0]*.84,v[1]*.82))); self.add_widget(self.end)
     def btn(self,text,x,w):
         b=Button(text=text,size_hint=(w,.62),pos_hint={'x':x,'y':.18},background_normal='',background_color=PANEL2,color=WHITE,font_size='18sp'); self.controls.add_widget(b); return b
-    def enter_game(self): self.title.opacity=0; self.title.disabled=True; self.controls.opacity=1
+    def enter_game(self): self.title.opacity=0; self.title.disabled=True; self.controls.opacity=1; self.controls.disabled=False
     def hud(self,l,f):
         done=sum(x in f for x in l['required']); self.ep.text=f"EPISODE {l['episode']}: {l['title']}\n{l['institution']} • {l['city']} • {l['year']}"; self.pr.text=f"CLUES {done}/{len(l['required'])}"+(' • EXIT OPEN' if done==len(l['required']) else '')
-    def show_dialogue(self,sp,tx): self.box.text=f"[color=e7b84f][b]{sp}[/b][/color]\n{tx}"; self.box.opacity=1
-    def hide_dialogue(self): self.box.opacity=0
+    def show_dialogue(self,sp,tx): self.box.text=f"[color=e7b84f][b]{sp}[/b][/color]\n{tx}"; self.box.opacity=1; self.box.disabled=False
+    def hide_dialogue(self): self.box.opacity=0; self.box.disabled=True
     def chapter(self,l):
         self.hud(l,self.world.flags); self.card.text=f"[color=cc474f]EPISODE {l['episode']}[/color]\n[b]{l['title']}[/b]\n\n[size=18sp]{l['institution']}[/size]\n[size=16sp]{l['city']} • {l['year']}[/size]"; self.card.opacity=1; Clock.schedule_once(lambda dt:setattr(self.card,'opacity',0),3.0)
     def ending(self):
-        self.controls.opacity=0; self.box.opacity=0; self.end.opacity=1; self.end.text="[b][size=30sp]SEASON ONE: THE RED THREAD[/size][/b]\n\nThe fictional crisis collapses. The Situation Centre returns to normal. The report is filed.\n\nThe pattern that began in Sheffield has crossed ten years of Tareq's life: academia, evidence, international programmes, OSINT and intelligence.\n\n[color=cc474f]04:12 — UNKNOWN NUMBER\n'Tareq. Vale is alive. And the red thread is not finished.'[/color]\n\n[size=14sp]Fictional drama inspired by real career milestones; operational events and supporting characters are invented.[/size]"
+        self.controls.opacity=0; self.controls.disabled=True; self.box.opacity=0; self.box.disabled=True; self.end.opacity=1; self.end.text="[b][size=30sp]SEASON ONE: THE RED THREAD[/size][/b]\n\nThe fictional crisis collapses. The Situation Centre returns to normal. The report is filed.\n\nThe pattern that began in Sheffield has crossed ten years of Tareq's life: academia, evidence, international programmes, OSINT and intelligence.\n\n[color=cc474f]04:12 — UNKNOWN NUMBER\n'Tareq. Vale is alive. And the red thread is not finished.'[/color]\n\n[size=14sp]Fictional drama inspired by real career milestones; operational events and supporting characters are invented.[/size]"
 
 class RedThreadApp(App):
     title='Tareq: The Red Thread'
-    def build(self): Window.size=(960,540); return UI()
+    def build(self):
+        # Never force a desktop window size on Android. Let Android provide the
+        # real fullscreen surface; only use 960x540 while testing on desktop.
+        if platform != 'android':
+            Window.size=(960,540)
+        return UI()
 
 if __name__=='__main__': RedThreadApp().run()
