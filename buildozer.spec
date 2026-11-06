@@ -23,6 +23,7 @@ android.accept_sdk_license = True
 # Ubuntu 24.04 / Python 3.12 debug-build path.
 # p4a master is the stable line for Python <= 3.12.
 p4a.branch = master
+p4a.local_recipes = ./recipes
 
 [buildozer]
 
