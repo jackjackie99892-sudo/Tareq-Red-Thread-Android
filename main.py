@@ -1,4 +1,4 @@
-__version__ = '1.0.1'
+__version__ = '1.0.2'
 
 from math import sin
 from kivy.app import App
@@ -203,26 +203,102 @@ class World(Widget):
 
 class UI(FloatLayout):
     def __init__(self,**kw):
-        super().__init__(**kw); self.world=World(self,size_hint=(1,.80),pos_hint={'x':0,'y':.20}); self.add_widget(self.world)
+        super().__init__(**kw)
+        self._left_touches=set()
+        self._right_touches=set()
+        self._started=False
+        self.world=World(self,size_hint=(1,.80),pos_hint={'x':0,'y':.20}); self.add_widget(self.world)
         self.title=FloatLayout(size_hint=(1,1)); self.add_widget(self.title)
         self.title.add_widget(Label(text='[b]TAREQ: THE RED THREAD[/b]',markup=True,font_size='34sp',color=WHITE,size_hint=(.9,.12),pos_hint={'x':.05,'y':.72}))
         self.title.add_widget(Label(text='A FICTIONALISED CAREER DRAMA\n\nReal name. Real cities. Real institutions.\nInvented mystery, characters and operational events.',font_size='18sp',color=DIM,halign='center',size_hint=(.9,.30),pos_hint={'x':.05,'y':.38}))
-        b=Button(text='START EPISODE 1',size_hint=(.42,.10),pos_hint={'x':.29,'y':.25},background_normal='',background_color=TEAL,color=(.03,.05,.07,1),font_size='20sp'); b.bind(on_release=lambda *_:self.world.start()); self.title.add_widget(b)
+        b=Button(text='TAP ANYWHERE TO START',size_hint=(.50,.10),pos_hint={'x':.25,'y':.25},background_normal='',background_color=TEAL,color=(.03,.05,.07,1),font_size='20sp',disabled=True); self.title.add_widget(b)
         self.title.add_widget(Label(text='Fiction inspired by real career milestones. It does not depict real institutional investigations or wrongdoing.',font_size='12sp',color=DIM,size_hint=(.96,.08),pos_hint={'x':.02,'y':.05}))
         self.controls=FloatLayout(size_hint=(1,.20),pos_hint={'x':0,'y':0},opacity=0,disabled=True); self.add_widget(self.controls)
         self.lb=self.btn('◀',.02,.10); self.rb=self.btn('▶',.14,.10); self.jb=self.btn('JUMP',.28,.16)
-        self.lb.bind(on_press=lambda *_:setattr(self.world,'left',True),on_release=lambda *_:setattr(self.world,'left',False)); self.rb.bind(on_press=lambda *_:setattr(self.world,'right',True),on_release=lambda *_:setattr(self.world,'right',False)); self.jb.bind(on_press=lambda *_:self.world.jump())
+        # Buttons are visual labels only on Android. Raw touch routing below
+        # handles movement and jumping directly, so no mouse-style Button
+        # events are required.
+        self.lb.disabled=True; self.rb.disabled=True; self.jb.disabled=True
         self.ep=Label(text='',font_size='15sp',color=WHITE,size_hint=(.50,.55),pos_hint={'x':.46,'y':.37},halign='left'); self.controls.add_widget(self.ep)
         self.pr=Label(text='',font_size='14sp',color=GOLD,size_hint=(.34,.25),pos_hint={'x':.46,'y':.12},halign='left'); self.controls.add_widget(self.pr)
-        self.box=Button(text='',markup=True,font_size='17sp',halign='left',valign='middle',size_hint=(.90,.22),pos_hint={'x':.05,'y':.23},background_normal='',background_color=(.04,.06,.09,.98),color=WHITE,opacity=0,disabled=True); self.box.bind(size=lambda i,v:setattr(i,'text_size',(v[0]-30,v[1]-20))); self.box.bind(on_release=lambda *_:self.world.close_dialogue()); self.add_widget(self.box)
+        self.touch_hint=Label(text='TOUCH: hold ◀/▶  •  tap JUMP  •  tap clues/people',font_size='11sp',color=DIM,size_hint=(.50,.18),pos_hint={'x':.46,'y':.00},halign='left'); self.controls.add_widget(self.touch_hint)
+        self.box=Button(text='',markup=True,font_size='17sp',halign='left',valign='middle',size_hint=(.90,.22),pos_hint={'x':.05,'y':.23},background_normal='',background_color=(.04,.06,.09,.98),color=WHITE,opacity=0,disabled=True); self.box.bind(size=lambda i,v:setattr(i,'text_size',(v[0]-30,v[1]-20))); self.add_widget(self.box)
         self.card=Label(text='',markup=True,font_size='26sp',color=WHITE,halign='center',valign='middle',size_hint=(1,1),opacity=0); self.card.bind(size=lambda i,v:setattr(i,'text_size',(v[0]*.85,v[1]*.65))); self.add_widget(self.card)
         self.end=Label(text='',markup=True,font_size='20sp',color=WHITE,halign='center',valign='middle',size_hint=(1,1),opacity=0); self.end.bind(size=lambda i,v:setattr(i,'text_size',(v[0]*.84,v[1]*.82))); self.add_widget(self.end)
+    def on_touch_down(self,touch):
+        # TOUCH-FIRST ANDROID INPUT
+        # We intentionally handle raw finger events at the root level instead
+        # of depending on Kivy Button mouse/click behaviour.
+
+        # Title: any finger tap anywhere starts the game.
+        if not self._started and not self.world.active:
+            self.world.start()
+            return True
+
+        # Ending: any tap restarts season one.
+        if not self.world.active and self.end.opacity > 0:
+            self.end.opacity=0
+            self.world.start()
+            return True
+
+        # Dialogue: any tap advances/closes it.
+        if self.world.dialogue:
+            self.world.close_dialogue()
+            return True
+
+        # Game controls occupy the bottom 20% of the physical screen.
+        if self.world.active and touch.y <= self.height * 0.20:
+            nx = touch.x / self.width if self.width else 0
+
+            # Large finger-friendly hit zones, wider than their drawings.
+            if nx < 0.16:
+                self._left_touches.add(touch.uid)
+                self.world.left=True
+                return True
+
+            if nx < 0.32:
+                self._right_touches.add(touch.uid)
+                self.world.right=True
+                return True
+
+            if nx < 0.50:
+                self.world.jump()
+                return True
+
+            # HUD area: consume the touch so it does not accidentally move.
+            return True
+
+        # Everything above the control bar belongs to the world.
+        if self.world.active and self.world.collide_point(*touch.pos):
+            return self.world.on_touch_down(touch)
+
+        return True
+
+    def on_touch_up(self,touch):
+        # Movement is held for as long as the finger is held down.
+        if touch.uid in self._left_touches:
+            self._left_touches.discard(touch.uid)
+            self.world.left=bool(self._left_touches)
+
+        if touch.uid in self._right_touches:
+            self._right_touches.discard(touch.uid)
+            self.world.right=bool(self._right_touches)
+
+        return True
+
+    def on_touch_move(self,touch):
+        # Keep held directions active while a finger moves slightly. This is
+        # more forgiving on real phone screens than tiny Button hitboxes.
+        if touch.uid in self._left_touches or touch.uid in self._right_touches:
+            return True
+        return True
+
     def btn(self,text,x,w):
         b=Button(text=text,size_hint=(w,.62),pos_hint={'x':x,'y':.18},background_normal='',background_color=PANEL2,color=WHITE,font_size='18sp'); self.controls.add_widget(b); return b
-    def enter_game(self): self.title.opacity=0; self.title.disabled=True; self.controls.opacity=1; self.controls.disabled=False
+    def enter_game(self): self._started=True; self.title.opacity=0; self.title.disabled=True; self.controls.opacity=1; self.controls.disabled=False; self._left_touches.clear(); self._right_touches.clear(); self.world.left=False; self.world.right=False
     def hud(self,l,f):
         done=sum(x in f for x in l['required']); self.ep.text=f"EPISODE {l['episode']}: {l['title']}\n{l['institution']} • {l['city']} • {l['year']}"; self.pr.text=f"CLUES {done}/{len(l['required'])}"+(' • EXIT OPEN' if done==len(l['required']) else '')
-    def show_dialogue(self,sp,tx): self.box.text=f"[color=e7b84f][b]{sp}[/b][/color]\n{tx}"; self.box.opacity=1; self.box.disabled=False
+    def show_dialogue(self,sp,tx): self.box.text=f"[color=e7b84f][b]{sp}[/b][/color]\n{tx}\n\n[size=12sp][color=9aa4b3]TAP ANYWHERE TO CONTINUE[/color][/size]"; self.box.opacity=1; self.box.disabled=True
     def hide_dialogue(self): self.box.opacity=0; self.box.disabled=True
     def chapter(self,l):
         self.hud(l,self.world.flags); self.card.text=f"[color=cc474f]EPISODE {l['episode']}[/color]\n[b]{l['title']}[/b]\n\n[size=18sp]{l['institution']}[/size]\n[size=16sp]{l['city']} • {l['year']}[/size]"; self.card.opacity=1; Clock.schedule_once(lambda dt:setattr(self.card,'opacity',0),3.0)
