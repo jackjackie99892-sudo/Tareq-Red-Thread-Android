@@ -7,7 +7,7 @@ package.domain = com.tareqomairi
 source.dir = .
 source.include_exts = py,png,jpg,jpeg,kv,atlas,json,txt,wav
 
-version = 1.0.0
+version = 1.0.2
 
 requirements = python3,kivy,charset-normalizer==3.4.9
 
